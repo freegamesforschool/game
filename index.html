@@ -2,92 +2,178 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Dodge!</title>
+<title>Doom-Like Raycaster</title>
 <style>
-  body { margin:0; overflow:hidden; background:#111; }
-  canvas { display:block; }
-  #score {
+  body { margin:0; overflow:hidden; background:#000; }
+  canvas { display:block; image-rendering: pixelated; }
+  #crosshair {
+    position:fixed; top:50%; left:50%;
+    width:20px; height:20px;
+    margin-left:-10px; margin-top:-10px;
+    border:2px solid white; border-radius:50%;
+    pointer-events:none;
+  }
+  #info {
     position:fixed; top:10px; left:10px;
-    color:white; font-family:sans-serif; font-size:20px;
+    color:#fff; font-family:sans-serif; font-size:14px;
+    background:rgba(0,0,0,0.5); padding:4px 8px; border-radius:4px;
   }
 </style>
 </head>
 <body>
 <canvas id="game"></canvas>
-<div id="score">Score: 0</div>
+<div id="crosshair"></div>
+<div id="info">W/S: move • A/D: strafe • ←/→: turn</div>
 
 <script>
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
-function resize(){ canvas.width = innerWidth; canvas.height = innerHeight; }
-resize(); addEventListener("resize", resize);
+function resize(){
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener("resize", resize);
 
-let player = { x: innerWidth/2, y: innerHeight-80, w:50, h:50, speed:7 };
-let keys = {};
-let objects = [];
-let score = 0;
-let spawnTimer = 0;
+// ---------- MAP (1 = wall, 0 = empty) ----------
+const map = [
+  "111111111111",
+  "1..........1",
+  "1..1111....1",
+  "1..1..1....1",
+  "1..1..1....1",
+  "1..1111....1",
+  "1..........1",
+  "1....1111..1",
+  "1..........1",
+  "111111111111"
+];
+const MAP_W = map[0].length;
+const MAP_H = map.length;
+const TILE = 64;
 
-addEventListener("keydown", e => keys[e.key] = true);
-addEventListener("keyup", e => keys[e.key] = false);
+// ---------- PLAYER ----------
+let px = 3.5 * TILE;
+let py = 5.5 * TILE;
+let pa = 0; // angle
+const moveSpeed = 0.18;
+const rotSpeed = 0.004;
 
-function spawnObject(){
-  objects.push({
-    x: Math.random()*canvas.width,
-    y: -40,
-    size: 30 + Math.random()*20,
-    speed: 3 + Math.random()*4
-  });
+// ---------- INPUT ----------
+const keys = {};
+window.addEventListener("keydown", e => { keys[e.key.toLowerCase()] = true; });
+window.addEventListener("keyup",   e => { keys[e.key.toLowerCase()] = false; });
+
+// ---------- HELPERS ----------
+function isWall(x, y){
+  if(x < 0 || y < 0) return true;
+  const mx = Math.floor(x / TILE);
+  const my = Math.floor(y / TILE);
+  if(mx < 0 || my < 0 || mx >= MAP_W || my >= MAP_H) return true;
+  return map[my][mx] === "1";
 }
 
-function update(){
-  if(keys["ArrowLeft"] || keys["a"]) player.x -= player.speed;
-  if(keys["ArrowRight"] || keys["d"]) player.x += player.speed;
+// ---------- RAYCAST ----------
+const FOV = Math.PI / 3; // 60 deg
+function castRays(){
+  const w = canvas.width;
+  const h = canvas.height;
+  const numRays = w;
+  const halfFov = FOV / 2;
+  const distToPlane = (w / 2) / Math.tan(halfFov);
 
-  player.x = Math.max(0, Math.min(canvas.width-player.w, player.x));
+  for(let x = 0; x < numRays; x++){
+    const rayScreenPos = (2 * x / numRays) - 1;
+    const rayAngle = pa + Math.atan(rayScreenPos * Math.tan(halfFov) * 2);
 
-  spawnTimer++;
-  if(spawnTimer > 25){
-    spawnTimer = 0;
-    spawnObject();
-  }
+    const sin = Math.sin(rayAngle);
+    const cos = Math.cos(rayAngle);
 
-  for(let o of objects){
-    o.y += o.speed;
-    if(o.y > canvas.height){
-      score++;
-      document.getElementById("score").textContent = "Score: " + score;
-      objects.splice(objects.indexOf(o),1);
+    let dist = 0;
+    let hit = false;
+    let hitX = 0, hitY = 0;
+
+    while(!hit && dist < 1000){
+      dist += 2;
+      hitX = px + cos * dist;
+      hitY = py + sin * dist;
+      if(isWall(hitX, hitY)) hit = true;
     }
 
-    if(o.x < player.x+player.w &&
-       o.x+o.size > player.x &&
-       o.y < player.y+player.h &&
-       o.y+o.size > player.y){
-      alert("Game Over! Final Score: " + score);
-      location.reload();
-    }
+    if(!hit) continue;
+
+    const correctedDist = dist * Math.cos(rayAngle - pa);
+    const wallHeight = (TILE / correctedDist) * distToPlane;
+
+    const top = (h / 2) - wallHeight / 2;
+    const bottom = top + wallHeight;
+
+    const shade = Math.max(0, 1 - correctedDist / 800);
+    const r = Math.floor(180 * shade);
+    const g = Math.floor(40 * shade);
+    const b = Math.floor(40 * shade);
+    ctx.fillStyle = `rgb(${r},${g},${b})`;
+    ctx.fillRect(x, top, 1, wallHeight);
   }
 }
 
-function draw(){
+// ---------- FLOOR & CEILING ----------
+function drawFloorCeiling(){
+  const w = canvas.width;
+  const h = canvas.height;
+  const horizon = h / 2;
+
+  const gradCeil = ctx.createLinearGradient(0,0,0,horizon);
+  gradCeil.addColorStop(0,"#000022");
+  gradCeil.addColorStop(1,"#000000");
+  ctx.fillStyle = gradCeil;
+  ctx.fillRect(0,0,w,horizon);
+
+  const gradFloor = ctx.createLinearGradient(0,horizon,0,h);
+  gradFloor.addColorStop(0,"#202010");
+  gradFloor.addColorStop(1,"#000000");
+  ctx.fillStyle = gradFloor;
+  ctx.fillRect(0,horizon,w,h);
+}
+
+// ---------- UPDATE ----------
+let lastTime = performance.now();
+function update(dt){
+  const forward = (keys["w"] ? 1 : 0) - (keys["s"] ? 1 : 0);
+  const strafe  = (keys["d"] ? 1 : 0) - (keys["a"] ? 1 : 0);
+  const turnL   = keys["arrowleft"];
+  const turnR   = keys["arrowright"];
+
+  if(turnL) pa -= rotSpeed * dt;
+  if(turnR) pa += rotSpeed * dt;
+
+  const cos = Math.cos(pa);
+  const sin = Math.sin(pa);
+
+  const moveStep = moveSpeed * dt * forward;
+  const strafeStep = moveSpeed * dt * strafe;
+
+  let nx = px + cos * moveStep + Math.cos(pa + Math.PI/2) * strafeStep;
+  let ny = py + sin * moveStep + Math.sin(pa + Math.PI/2) * strafeStep;
+
+  if(!isWall(nx, py)) px = nx;
+  if(!isWall(px, ny)) py = ny;
+}
+
+// ---------- MAIN LOOP ----------
+function loop(now){
+  const dt = now - lastTime;
+  lastTime = now;
+
+  update(dt);
+
   ctx.clearRect(0,0,canvas.width,canvas.height);
+  drawFloorCeiling();
+  castRays();
 
-  ctx.fillStyle = "#4af";
-  ctx.fillRect(player.x, player.y, player.w, player.h);
-
-  ctx.fillStyle = "#f44";
-  for(let o of objects){
-    ctx.fillRect(o.x, o.y, o.size, o.size);
-  }
-}
-
-function loop(){
-  update();
-  draw();
   requestAnimationFrame(loop);
 }
-loop();
+requestAnimationFrame(loop);
 </script>
 </body>
 </html>
