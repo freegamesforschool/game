@@ -2,133 +2,172 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Escape Tsunami (WebGL Prototype)</title>
+  <title>Escape Tsunami – Fixed WebGL Build</title>
   <style>
     body { margin:0; overflow:hidden; background:#111; }
-    canvas { display:block; width:100vw; height:100vh; }
+    canvas { width:100vw; height:100vh; display:block; }
     #mobileControls {
-      position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
-      display: flex; gap: 20px;
+      position:absolute; bottom:20px; left:50%; transform:translateX(-50%);
+      display:flex; gap:20px;
     }
     .btn {
-      width: 60px; height: 60px; background: rgba(255,255,255,0.2);
-      border-radius: 50%; text-align:center; line-height:60px; color:#fff;
-      font-weight:bold; user-select:none;
+      width:60px; height:60px; background:rgba(255,255,255,0.2);
+      border-radius:50%; color:white; text-align:center;
+      line-height:60px; font-size:24px; user-select:none;
     }
-    @media (min-width: 768px) {
-      #mobileControls { display:none; }
-    }
+    @media (min-width:768px) { #mobileControls { display:none; } }
   </style>
 </head>
 <body>
+
 <canvas id="glcanvas"></canvas>
+
 <div id="mobileControls">
   <div class="btn" id="left">←</div>
   <div class="btn" id="right">→</div>
   <div class="btn" id="jump">⤴</div>
 </div>
+
 <script>
+// ---------------------------------------------------------
+//  BASIC WEBGL SETUP
+// ---------------------------------------------------------
 const canvas = document.getElementById("glcanvas");
 const gl = canvas.getContext("webgl");
-canvas.width = window.innerWidth;
-canvas.height = window.innerHeight;
+canvas.width = innerWidth;
+canvas.height = innerHeight;
 
-if (!gl) { alert("WebGL not supported"); }
+if (!gl) alert("WebGL not supported");
 
-// Simple vertex + fragment shaders
+// ---------------------------------------------------------
+//  SHADERS
+// ---------------------------------------------------------
 const vsSource = `
 attribute vec4 aVertexPosition;
 uniform mat4 uModelViewMatrix;
 uniform mat4 uProjectionMatrix;
-void main(void) {
+void main() {
   gl_Position = uProjectionMatrix * uModelViewMatrix * aVertexPosition;
-}`;
-const fsSource = `
-void main(void) {
-  gl_FragColor = vec4(0.2, 0.7, 1.0, 1.0);
-}`;
-
-// Compile shader
-function loadShader(type, source) {
-  const shader = gl.createShader(type);
-  gl.shaderSource(shader, source);
-  gl.compileShader(shader);
-  return shader;
 }
+`;
+
+const fsSource = `
+void main() {
+  gl_FragColor = vec4(0.2, 0.7, 1.0, 1.0);
+}
+`;
+
+function compileShader(type, src) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  return s;
+}
+
 const shaderProgram = gl.createProgram();
-gl.attachShader(shaderProgram, loadShader(gl.VERTEX_SHADER, vsSource));
-gl.attachShader(shaderProgram, loadShader(gl.FRAGMENT_SHADER, fsSource));
+gl.attachShader(shaderProgram, compileShader(gl.VERTEX_SHADER, vsSource));
+gl.attachShader(shaderProgram, compileShader(gl.FRAGMENT_SHADER, fsSource));
 gl.linkProgram(shaderProgram);
 gl.useProgram(shaderProgram);
 
 const programInfo = {
   attribLocations: {
-    vertexPosition: gl.getAttribLocation(shaderProgram, 'aVertexPosition'),
+    vertexPosition: gl.getAttribLocation(shaderProgram, "aVertexPosition"),
   },
   uniformLocations: {
-    projectionMatrix: gl.getUniformLocation(shaderProgram, 'uProjectionMatrix'),
-    modelViewMatrix: gl.getUniformLocation(shaderProgram, 'uModelViewMatrix'),
-  },
+    projectionMatrix: gl.getUniformLocation(shaderProgram, "uProjectionMatrix"),
+    modelViewMatrix: gl.getUniformLocation(shaderProgram, "uModelViewMatrix"),
+  }
 };
 
-// Cube geometry
-function initCubeBuffer() {
+// ---------------------------------------------------------
+//  CUBE GEOMETRY
+// ---------------------------------------------------------
+function createCube() {
   const positions = [
-    -1,-1, 1,  1,-1, 1,  1, 1, 1, -1, 1, 1, // front
-    -1,-1,-1, -1, 1,-1,  1, 1,-1,  1,-1,-1, // back
-    -1, 1,-1, -1, 1, 1,  1, 1, 1,  1, 1,-1, // top
-    -1,-1,-1,  1,-1,-1,  1,-1, 1, -1,-1, 1, // bottom
-     1,-1,-1,  1, 1,-1,  1, 1, 1,  1,-1, 1, // right
-    -1,-1,-1, -1,-1, 1, -1, 1, 1, -1, 1,-1, // left
+    // front
+    -1,-1,1, 1,-1,1, 1,1,1, -1,1,1,
+    // back
+    -1,-1,-1, -1,1,-1, 1,1,-1, 1,-1,-1,
+    // top
+    -1,1,-1, -1,1,1, 1,1,1, 1,1,-1,
+    // bottom
+    -1,-1,-1, 1,-1,-1, 1,-1,1, -1,-1,1,
+    // right
+    1,-1,-1, 1,1,-1, 1,1,1, 1,-1,1,
+    // left
+    -1,-1,-1, -1,-1,1, -1,1,1, -1,1,-1
   ];
-  const positionBuffer = gl.createBuffer();
-  gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+
+  const buffer = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
-  return { position: positionBuffer, vertexCount: 36 };
+
+  return { buffer, count: 36 };
 }
-const cubeBuffer = initCubeBuffer();
 
-// Matrices
-function loadIdentity() { return mat4.create(); }
-function multMatrix(m, n) { return mat4.multiply(mat4.create(), m, n); }
-function mvTranslate(m, v) { return mat4.translate(mat4.create(), m, v); }
+const cube = createCube();
 
-function drawScene(playerX, tsunamiZ) {
-  gl.clearColor(0,0,0,1);
-  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-  gl.enable(gl.DEPTH_TEST);
+// ---------------------------------------------------------
+//  FULL mat4 IMPLEMENTATION (FIXED)
+// ---------------------------------------------------------
+const mat4 = {
+  create() {
+    const out = new Float32Array(16);
+    out[0]=1; out[5]=1; out[10]=1; out[15]=1;
+    return out;
+  },
 
-  const fieldOfView = 45 * Math.PI / 180;
-  const aspect = canvas.width / canvas.height;
-  const projectionMatrix = mat4.create();
-  mat4.perspective(projectionMatrix, fieldOfView, aspect, 0.1, 100.0);
+  perspective(out, fovy, aspect, near, far) {
+    const f = 1.0 / Math.tan(fovy / 2);
+    const nf = 1 / (near - far);
 
-  // Player cube
-  let modelViewMatrix = mat4.create();
-  mat4.translate(modelViewMatrix, modelViewMatrix, [playerX, -1.5, -6]);
-  {
-    const numComponents = 3;
-    const type = gl.FLOAT;
-    gl.bindBuffer(gl.ARRAY_BUFFER, cubeBuffer.position);
-    gl.vertexAttribPointer(programInfo.attribLocations.vertexPosition, numComponents, type, false, 0, 0);
-    gl.enableVertexAttribArray(programInfo.attribLocations.vertexPosition);
+    out[0] = f / aspect;
+    out[1] = 0;
+    out[2] = 0;
+    out[3] = 0;
+
+    out[4] = 0;
+    out[5] = f;
+    out[6] = 0;
+    out[7] = 0;
+
+    out[8] = 0;
+    out[9] = 0;
+    out[10] = (far + near) * nf;
+    out[11] = -1;
+
+    out[12] = 0;
+    out[13] = 0;
+    out[14] = (2 * far * near) * nf;
+    out[15] = 0;
+  },
+
+  translate(out, a, v) {
+    const x=v[0], y=v[1], z=v[2];
+    out.set(a);
+    out[12] = a[0]*x + a[4]*y + a[8]*z + a[12];
+    out[13] = a[1]*x + a[5]*y + a[9]*z + a[13];
+    out[14] = a[2]*x + a[6]*y + a[10]*z + a[14];
+    out[15] = a[3]*x + a[7]*y + a[11]*z + a[15];
+  },
+
+  scale(out, a, v) {
+    const x=v[0], y=v[1], z=v[2];
+    out[0]=a[0]*x; out[1]=a[1]*x; out[2]=a[2]*x; out[3]=a[3]*x;
+    out[4]=a[4]*y; out[5]=a[5]*y; out[6]=a[6]*y; out[7]=a[7]*y;
+    out[8]=a[8]*z; out[9]=a[9]*z; out[10]=a[10]*z; out[11]=a[11]*z;
+    out[12]=a[12]; out[13]=a[13]; out[14]=a[14]; out[15]=a[15];
   }
-  gl.uniformMatrix4fv(programInfo.uniformLocations.projectionMatrix, false, projectionMatrix);
-  gl.uniformMatrix4fv(programInfo.uniformLocations.modelViewMatrix, false, modelViewMatrix);
-  gl.drawArrays(gl.TRIANGLE_FAN, 0, cubeBuffer.vertexCount);
+};
 
-  // Tsunami wall
-  let tsunamiMatrix = mat4.create();
-  mat4.translate(tsunamiMatrix, tsunamiMatrix, [0, 0, tsunamiZ]);
-  mat4.scale(tsunamiMatrix, tsunamiMatrix, [10, 10, 1]);
-  gl.uniformMatrix4fv(programInfo.uniformLocations.modelViewMatrix, false, tsunamiMatrix);
-  gl.drawArrays(gl.TRIANGLE_FAN, 0, cubeBuffer.vertexCount);
-}
-
-// Game loop
+// ---------------------------------------------------------
+//  GAME STATE
+// ---------------------------------------------------------
 let playerX = 0;
-let tsunamiZ = 10;
+let tsunamiZ = 12;
 let keys = {};
+
 document.addEventListener("keydown", e => keys[e.key] = true);
 document.addEventListener("keyup", e => keys[e.key] = false);
 
@@ -137,34 +176,53 @@ document.getElementById("left").ontouchend = ()=>keys["ArrowLeft"]=false;
 document.getElementById("right").ontouchstart = ()=>keys["ArrowRight"]=true;
 document.getElementById("right").ontouchend = ()=>keys["ArrowRight"]=false;
 
+// ---------------------------------------------------------
+//  DRAW SCENE
+// ---------------------------------------------------------
+function drawScene() {
+  gl.clearColor(0,0,0,1);
+  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+  gl.enable(gl.DEPTH_TEST);
+
+  const projection = mat4.create();
+  mat4.perspective(projection, 45*Math.PI/180, canvas.width/canvas.height, 0.1, 100);
+
+  // PLAYER
+  let mv = mat4.create();
+  mat4.translate(mv, mv, [playerX, -1.5, -6]);
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, cube.buffer);
+  gl.vertexAttribPointer(programInfo.attribLocations.vertexPosition, 3, gl.FLOAT, false, 0, 0);
+  gl.enableVertexAttribArray(programInfo.attribLocations.vertexPosition);
+
+  gl.uniformMatrix4fv(programInfo.uniformLocations.projectionMatrix, false, projection);
+  gl.uniformMatrix4fv(programInfo.uniformLocations.modelViewMatrix, false, mv);
+  gl.drawArrays(gl.TRIANGLE_FAN, 0, cube.count);
+
+  // TSUNAMI WALL
+  let wave = mat4.create();
+  mat4.translate(wave, wave, [0, 0, tsunamiZ]);
+  mat4.scale(wave, wave, [10, 10, 1]);
+
+  gl.uniformMatrix4fv(programInfo.uniformLocations.modelViewMatrix, false, wave);
+  gl.drawArrays(gl.TRIANGLE_FAN, 0, cube.count);
+}
+
+// ---------------------------------------------------------
+//  GAME LOOP
+// ---------------------------------------------------------
 function update() {
   if (keys["ArrowLeft"]) playerX -= 0.05;
   if (keys["ArrowRight"]) playerX += 0.05;
+
   tsunamiZ -= 0.05;
-  drawScene(playerX, tsunamiZ);
+
+  drawScene();
   requestAnimationFrame(update);
 }
+
 update();
 </script>
-<!-- Minimal mat4 implementation -->
-<script>
-const mat4 = {
-  create: ()=>new Float32Array(16).fill(0).map((v,i)=>i%5==0?1:0),
-  perspective: function(out,fovy,aspect,near,far){
-    const f=1.0/Math.tan(fovy/2), nf=1/(near-far);
-    out[0]=f/aspect; out[1]=0; out[2]=0; out[3]=0;
-    out[4]=0; out[5]=f; out[6]=0; out[7]=0;
-    out[8]=0; out[9]=0; out[10]=(far+near)*nf; out[11]=-1;
-    out[12]=0; out[13]=0; out[14]=2*far*near*nf; out[15]=0;
-  },
-  translate: function(out,a,v){
-    out.set(a); out[12]+=v[0]; out[13]+=v[1]; out[14]+=v[2];
-  },
-  scale: function(out,a,v){
-    out.set(a); out[0]*=v[0]; out[5]*=v[1]; out[10]*=v[2];
-  },
-  multiply: function(out,a,b){ /* simplified */ }
-};
-</script>
+
 </body>
 </html>
