@@ -1,329 +1,93 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
 <meta charset="UTF-8">
-<title>Hex Drift Arena</title>
+<title>Dodge!</title>
 <style>
-  html,body{margin:0;padding:0;overflow:hidden;background:#05060a;color:#fff;font-family:sans-serif;}
-  canvas{display:block;background:#05060a;}
-  #info{
-    position:fixed;top:10px;left:10px;font-size:14px;
-    background:rgba(0,0,0,0.5);padding:6px 10px;border-radius:4px;
+  body { margin:0; overflow:hidden; background:#111; }
+  canvas { display:block; }
+  #score {
+    position:fixed; top:10px; left:10px;
+    color:white; font-family:sans-serif; font-size:20px;
   }
 </style>
 </head>
 <body>
 <canvas id="game"></canvas>
-<div id="info">Arrows/WASD: steer & throttle • Space: jump</div>
+<div id="score">Score: 0</div>
+
 <script>
-// ================== BASIC SETUP ==================
-const canvas = document.getElementById('game');
-const ctx = canvas.getContext('2d');
-function resize(){
-  canvas.width = window.innerWidth;
-  canvas.height = window.innerHeight;
-}
-window.addEventListener('resize', resize);
-resize();
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+function resize(){ canvas.width = innerWidth; canvas.height = innerHeight; }
+resize(); addEventListener("resize", resize);
 
-let lastTime = performance.now();
+let player = { x: innerWidth/2, y: innerHeight-80, w:50, h:50, speed:7 };
+let keys = {};
+let objects = [];
+let score = 0;
+let spawnTimer = 0;
 
-// ================== INPUT ==================
-const keys = {};
-window.addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; });
-window.addEventListener('keyup',   e => { keys[e.key.toLowerCase()] = false; });
+addEventListener("keydown", e => keys[e.key] = true);
+addEventListener("keyup", e => keys[e.key] = false);
 
-// ================== HEX GRID ==================
-const HEX_SIZE = 40;
-const GRID_RADIUS = 7; // initial radius in hexes
-let shrinkTimer = 0;
-let shrinkInterval = 8000; // ms between shrink steps
-let currentRadius = GRID_RADIUS;
-
-function axialToPixel(q,r){
-  const x = HEX_SIZE * (Math.sqrt(3)*q + Math.sqrt(3)/2*r);
-  const y = HEX_SIZE * (3/2*r);
-  return {x,y};
+function spawnObject(){
+  objects.push({
+    x: Math.random()*canvas.width,
+    y: -40,
+    size: 30 + Math.random()*20,
+    speed: 3 + Math.random()*4
+  });
 }
 
-const tiles = new Map();
-function keyQR(q,r){ return q+','+r; }
+function update(){
+  if(keys["ArrowLeft"] || keys["a"]) player.x -= player.speed;
+  if(keys["ArrowRight"] || keys["d"]) player.x += player.speed;
 
-function generateGrid(){
-  tiles.clear();
-  for(let q=-GRID_RADIUS;q<=GRID_RADIUS;q++){
-    for(let r=-GRID_RADIUS;r<=GRID_RADIUS;r++){
-      if(Math.abs(q+r) <= GRID_RADIUS){
-        const {x,y} = axialToPixel(q,r);
-        tiles.set(keyQR(q,r),{
-          q,r,x,y,
-          active:true,
-          visited:false,
-          decayTimer:0
-        });
-      }
-    }
+  player.x = Math.max(0, Math.min(canvas.width-player.w, player.x));
+
+  spawnTimer++;
+  if(spawnTimer > 25){
+    spawnTimer = 0;
+    spawnObject();
   }
-}
-generateGrid();
 
-// ================== CAR / BOT ==================
-class Car {
-  constructor(x,y,color,isPlayer=false){
-    this.x = x;
-    this.y = y;
-    this.z = 0;
-    this.vz = 0;
-    this.angle = 0;
-    this.vx = 0;
-    this.vy = 0;
-    this.color = color;
-    this.isPlayer = isPlayer;
-    this.jumpCooldown = 0;
-    this.alive = true;
-  }
-  update(dt){
-    if(!this.alive) return;
-
-    const accel = 0.0008;
-    const maxSpeed = 0.6;
-    const steerSpeed = 0.004;
-    const friction = 0.0006;
-    const driftFactor = 0.96;
-
-    if(this.isPlayer){
-      const forward = keys['w'] || keys['arrowup'];
-      const back    = keys['s'] || keys['arrowdown'];
-      const left    = keys['a'] || keys['arrowleft'];
-      const right   = keys['d'] || keys['arrowright'];
-
-      if(left)  this.angle -= steerSpeed * dt;
-      if(right) this.angle += steerSpeed * dt;
-
-      let thrust = 0;
-      if(forward) thrust += accel * dt;
-      if(back)    thrust -= accel * dt;
-
-      this.vx += Math.cos(this.angle) * thrust;
-      this.vy += Math.sin(this.angle) * thrust;
-
-      const speed = Math.hypot(this.vx,this.vy);
-      if(speed > maxSpeed){
-        this.vx *= maxSpeed/speed;
-        this.vy *= maxSpeed/speed;
-      }
-
-      if((keys[' '] || keys['space']) && this.jumpCooldown<=0 && this.z<=0){
-        this.vz = 0.02;
-        this.jumpCooldown = 1000;
-      }
-    } else {
-      // Simple bot AI: drift around center, avoid edges
-      const targetAngle = Math.atan2(-this.y, -this.x) + (Math.random()-0.5)*0.6;
-      let diff = ((targetAngle - this.angle + Math.PI*3)%(Math.PI*2))-Math.PI;
-      this.angle += Math.max(-steerSpeed*dt, Math.min(steerSpeed*dt, diff));
-
-      const thrust = accel * dt * 0.8;
-      this.vx += Math.cos(this.angle) * thrust;
-      this.vy += Math.sin(this.angle) * thrust;
-
-      const speed = Math.hypot(this.vx,this.vy);
-      if(speed > maxSpeed*0.9){
-        this.vx *= (maxSpeed*0.9)/speed;
-        this.vy *= (maxSpeed*0.9)/speed;
-      }
-
-      if(this.jumpCooldown<=0 && this.z<=0 && Math.random()<0.002){
-        this.vz = 0.02;
-        this.jumpCooldown = 1500 + Math.random()*1000;
-      }
+  for(let o of objects){
+    o.y += o.speed;
+    if(o.y > canvas.height){
+      score++;
+      document.getElementById("score").textContent = "Score: " + score;
+      objects.splice(objects.indexOf(o),1);
     }
 
-    // Drift: reduce lateral grip
-    this.vx *= driftFactor;
-    this.vy *= driftFactor;
-
-    // Friction
-    const sp = Math.hypot(this.vx,this.vy);
-    if(sp>0){
-      const f = Math.max(0, sp - friction*dt)/sp;
-      this.vx *= f;
-      this.vy *= f;
-    }
-
-    this.x += this.vx * dt;
-    this.y += this.vy * dt;
-
-    // Jump physics
-    if(this.jumpCooldown>0) this.jumpCooldown -= dt;
-    this.z += this.vz * dt;
-    this.vz -= 0.00008 * dt;
-    if(this.z<0){ this.z=0; this.vz=0; }
-
-    // Check tile
-    const tile = getTileAt(this.x,this.y);
-    if(tile && tile.active && this.z<=0){
-      if(!tile.visited){
-        tile.visited = true;
-        tile.decayTimer = 1500; // ms before disappearing
-      }
-    } else if(this.z<=0){
-      // fell
-      this.alive = false;
-    }
-  }
-  draw(ctx,cx,cy){
-    if(!this.alive) return;
-    const size = 16;
-    const sx = cx + this.x;
-    const sy = cy + this.y - this.z*800;
-
-    // shadow
-    ctx.save();
-    ctx.globalAlpha = 0.3;
-    ctx.fillStyle = "#000";
-    ctx.beginPath();
-    ctx.ellipse(cx+this.x, cy+this.y+4, size*0.9, size*0.5, 0, 0, Math.PI*2);
-    ctx.fill();
-    ctx.restore();
-
-    ctx.save();
-    ctx.translate(sx, sy);
-    ctx.rotate(this.angle);
-    ctx.fillStyle = this.color;
-    ctx.fillRect(-size*0.8,-size*0.5,size*1.6,size);
-    ctx.fillStyle = "#fff";
-    ctx.fillRect(size*0.2,-size*0.4,size*0.7,size*0.8);
-    ctx.restore();
-  }
-}
-
-function getTileAt(x,y){
-  // brute-force search nearest tile
-  let best=null, bestDist=HEX_SIZE*1.1;
-  for(const t of tiles.values()){
-    if(!t.active) continue;
-    const dx = x - t.x;
-    const dy = y - t.y;
-    const d = Math.hypot(dx,dy);
-    if(d<bestDist){
-      bestDist=d;
-      best=t;
-    }
-  }
-  return best;
-}
-
-// ================== GAME OBJECTS ==================
-const cars = [];
-function resetGame(){
-  cars.length = 0;
-  generateGrid();
-  currentRadius = GRID_RADIUS;
-  shrinkTimer = 0;
-
-  const center = axialToPixel(0,0);
-  const player = new Car(center.x, center.y, "#ff5555", true);
-  cars.push(player);
-
-  for(let i=0;i<5;i++){
-    const angle = (i/5)*Math.PI*2;
-    const r = HEX_SIZE*2.5;
-    const bot = new Car(center.x + Math.cos(angle)*r, center.y + Math.sin(angle)*r, "#55aaff", false);
-    bot.angle = angle + Math.PI;
-    cars.push(bot);
-  }
-}
-resetGame();
-
-// ================== ARENA SHRINK ==================
-function shrinkArena(){
-  if(currentRadius<=2) return;
-  currentRadius--;
-  for(const t of tiles.values()){
-    const dist = Math.max(Math.abs(t.q), Math.abs(t.r), Math.abs(t.q+t.r));
-    if(dist>currentRadius){
-      t.active = false;
+    if(o.x < player.x+player.w &&
+       o.x+o.size > player.x &&
+       o.y < player.y+player.h &&
+       o.y+o.size > player.y){
+      alert("Game Over! Final Score: " + score);
+      location.reload();
     }
   }
 }
 
-// ================== RENDER HEXES ==================
-function drawHex(ctx,x,y,size,fill,alpha=1){
-  const a = Math.PI/3;
-  ctx.save();
-  ctx.translate(x,y);
-  ctx.beginPath();
-  for(let i=0;i<6;i++){
-    const px = Math.cos(a*i)*size;
-    const py = Math.sin(a*i)*size;
-    if(i===0) ctx.moveTo(px,py); else ctx.lineTo(px,py);
+function draw(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  ctx.fillStyle = "#4af";
+  ctx.fillRect(player.x, player.y, player.w, player.h);
+
+  ctx.fillStyle = "#f44";
+  for(let o of objects){
+    ctx.fillRect(o.x, o.y, o.size, o.size);
   }
-  ctx.closePath();
-  ctx.globalAlpha = alpha;
-  ctx.fillStyle = fill;
-  ctx.fill();
-  ctx.restore();
 }
 
-// ================== MAIN LOOP ==================
-function loop(now){
-  const dt = now - lastTime;
-  lastTime = now;
-
-  shrinkTimer += dt;
-  if(shrinkTimer > shrinkInterval){
-    shrinkTimer = 0;
-    shrinkArena();
-  }
-
-  // Update tiles decay
-  for(const t of tiles.values()){
-    if(t.visited && t.active){
-      t.decayTimer -= dt;
-      if(t.decayTimer<=0){
-        t.active = false;
-      }
-    }
-  }
-
-  // Update cars
-  for(const c of cars) c.update(dt);
-
-  // Camera center at average of alive cars (or player)
-  let cx = 0, cy = 0, count=0;
-  for(const c of cars){
-    if(!c.alive) continue;
-    cx += c.x; cy += c.y; count++;
-  }
-  if(count>0){ cx/=count; cy/=count; }
-  const screenCX = canvas.width/2 - cx;
-  const screenCY = canvas.height/2 - cy;
-
-  // Clear
-  ctx.setTransform(1,0,0,1,0,0);
-  ctx.fillStyle = "#05060a";
-  ctx.fillRect(0,0,canvas.width,canvas.height);
-
-  // World transform
-  ctx.setTransform(1,0,0,1,screenCX,screenCY);
-
-  // Draw tiles
-  for(const t of tiles.values()){
-    if(!t.active) continue;
-    const dist = Math.max(Math.abs(t.q), Math.abs(t.r), Math.abs(t.q+t.r));
-    const edgeFactor = dist / GRID_RADIUS;
-    let col = `hsl(${200+edgeFactor*40},60%,${20+edgeFactor*20}%)`;
-    let alpha = t.visited ? Math.max(0.2, t.decayTimer/1500) : 1;
-    drawHex(ctx,t.x,t.y,HEX_SIZE*0.95,col,alpha);
-  }
-
-  // Draw cars
-  for(const c of cars) c.draw(ctx,0,0);
-
+function loop(){
+  update();
+  draw();
   requestAnimationFrame(loop);
 }
-requestAnimationFrame(loop);
+loop();
 </script>
 </body>
 </html>
